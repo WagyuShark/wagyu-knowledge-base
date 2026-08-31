@@ -112,6 +112,10 @@ content/cloud-engineer/kubernetes-services/
 ![Kubernetes service packet flow](./assets/packet-flow.png "Traffic from a client to a pod")
 ```
 
+## Authorship
+
+This `README.md` and repository scaffolding may be created or edited with AI assistance. Every piece of knowledge content committed under `content/` is authored without AI assistance, including Learning Posts, raw source examples, images, diagrams, tags, and post metadata.
+
 ## Rules
 
 - Repository content is written in English.
