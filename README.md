@@ -24,6 +24,46 @@ A public, English-language knowledge repository for documenting software enginee
 
 Every Markdown file is a Learning Post. There are no separate journal, note, or article content models. Templates may provide different section prompts, but they share the same frontmatter and publishing rules.
 
+## Naming conventions
+
+Use descriptive lowercase ASCII kebab-case names. The completion date belongs in frontmatter, not in the filename.
+
+```text
+tcp-three-way-handshake.md       Good
+TCP Handshake.md                 Avoid spaces and uppercase letters
+tcp_handshake.md                 Avoid underscores
+2026-08-31-tcp-handshake.md      Avoid date prefixes
+```
+
+Use a single Markdown file when the topic needs no supporting files:
+
+```text
+content/database/transaction-isolation.md
+```
+
+Use a topic directory with `index.md` when the post owns images or raw source:
+
+```text
+content/algorithms/breadth-first-search/
+├── index.md
+├── implementation.py
+└── implementation.go
+```
+
+Put language-specific topics below the language name:
+
+```text
+content/languages/typescript/type-narrowing.md
+content/languages/python/context-managers.md
+```
+
+Name troubleshooting posts after the observable problem:
+
+```text
+content/devops/github-actions-cache-miss.md
+content/database/postgresql-slow-index-scan.md
+```
+
 ## Workflow
 
 1. Open the repository root as an Obsidian vault.
