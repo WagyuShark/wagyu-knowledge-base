@@ -1,0 +1,312 @@
+#!/usr/bin/env bash
+# algo — build, run, test and prepare debugging for single-file C++/Rust solutions.
+#
+#   algo build <file> [--debug]   compile; prints the binary path
+#   algo run   <file> [N]         compile, then run with inoutput/input_N.txt as stdin (default N=1)
+#   algo test  <file>             compile, then compare every inoutput/input_N.txt with output_N.txt
+#   algo debug <file> [N]         compile without optimisation, then open lldb with inoutput/input_N.txt
+#   algo new   <platform> <id> <slug> [--cpp|--rust]
+#                                 create content/algorithms/problem-solving/<platform>/<id>-<slug>/
+#                                 with <id>-<slug>.cpp/.rs, inoutput/input_1.txt, inoutput/output_1.txt
+#   algo sync                     regenerate the local Cargo.toml so Zed/rust-analyzer see every .rs file
+#
+# Binaries go to /tmp/algo-build, never next to the source.
+# `--debug` always writes /tmp/algo-build/debug/{main,stdin} so Zed's debug.json can use fixed paths.
+
+set -euo pipefail
+
+# Resolve symlinks (e.g. ~/.local/bin/algo) so TOOL_DIR is the real _tools/algo.
+readonly SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+readonly TOOL_DIR="$(dirname "$SCRIPT_PATH")"
+readonly REPO_ROOT="$(cd "$TOOL_DIR/../.." && pwd)"
+readonly PROBLEM_ROOT="$REPO_ROOT/content/algorithms/problem-solving"
+readonly CARGO_MANIFEST="$PROBLEM_ROOT/Cargo.toml"
+readonly TEMPLATE="$REPO_ROOT/_templates/algorithm-learning-post.md"
+readonly BUILD_ROOT="/tmp/algo-build"
+readonly DEBUG_DIR="$BUILD_ROOT/debug"
+readonly CXX="${ALGO_CXX:-clang++}"
+readonly CXX_STD="${ALGO_CXX_STD:-c++20}"
+readonly RUST_EDITION="${ALGO_RUST_EDITION:-2021}"
+
+die() { printf 'algo: %s\n' "$*" >&2; exit 2; }
+
+usage() {
+  sed -n '2,15p' "$SCRIPT_PATH" | sed 's/^# \{0,1\}//' >&2
+  exit 2
+}
+
+# Absolute path of the source file, validated.
+resolve_source() {
+  local file="${1:-}"
+  [[ -n "$file" ]] || die "no source file given"
+  [[ -f "$file" ]] || die "file not found: $file"
+  case "$file" in
+    *.cpp|*.cc|*.cxx|*.rs) ;;
+    *) die "unsupported file type: $file (expected .cpp/.cc/.cxx/.rs)" ;;
+  esac
+  printf '%s/%s\n' "$(cd "$(dirname "$file")" && pwd)" "$(basename "$file")"
+}
+
+# Test cases live beside the source: inoutput/input_N.txt and inoutput/output_N.txt.
+readonly CASE_DIR="inoutput"
+input_file()  { printf '%s/%s/input_%s.txt\n'  "$(dirname "$1")" "$CASE_DIR" "$2"; }
+output_file() { printf '%s/%s/output_%s.txt\n' "$(dirname "$1")" "$CASE_DIR" "$2"; }
+
+# Case numbers present in inoutput/, ascending (input_2 before input_10).
+case_numbers() {
+  local f n
+  shopt -s nullglob
+  for f in "$(dirname "$1")/$CASE_DIR"/input_*.txt; do
+    n="${f##*/input_}"
+    n="${n%.txt}"
+    [[ "$n" =~ ^[0-9]+$ ]] && printf '%s\n' "$n"
+  done | sort -n
+  shopt -u nullglob
+}
+
+case_number() {
+  local n="${1:-1}"
+  [[ "$n" =~ ^[0-9]+$ ]] || die "case number must be a positive integer: $n"
+  printf '%s\n' "$n"
+}
+
+rel_path() { printf '%s\n' "${1#"$PROBLEM_ROOT"/}"; }
+
+# Per-source output path for release-style builds.
+output_path() {
+  local src="$1" stem key
+  stem="$(basename "${src%.*}")"
+  key="$(printf '%s' "$src" | shasum | cut -c1-12)"
+  printf '%s/%s/%s\n' "$BUILD_ROOT" "$key" "$stem"
+}
+
+compile_cpp() {
+  local src="$1" out="$2" profile="$3"
+  local -a flags=(-std="$CXX_STD" -I"$TOOL_DIR/include" -Wall -Wextra -Wshadow -DLOCAL -g)
+  if [[ "$profile" == debug ]]; then
+    flags+=(-O0)
+  else
+    flags+=(-O2 -fsanitize=address,undefined -fno-omit-frame-pointer)
+  fi
+  "$CXX" "${flags[@]}" "$src" -o "$out"
+}
+
+compile_rust() {
+  local src="$1" out="$2" profile="$3"
+  local -a flags=(--edition "$RUST_EDITION" -g -C debug-assertions=on --cfg local)
+  if [[ "$profile" == debug ]]; then
+    flags+=(-C opt-level=0)
+  else
+    flags+=(-C opt-level=2)
+  fi
+  rustc "${flags[@]}" --crate-name main "$src" -o "$out"
+}
+
+# build <abs-src> <profile> [case] -> prints binary path
+build() {
+  local src="$1" profile="$2" n="${3:-1}" out
+  if [[ "$profile" == debug ]]; then
+    out="$DEBUG_DIR/main"
+  else
+    out="$(output_path "$src")"
+  fi
+  mkdir -p "$(dirname "$out")"
+  rm -f "$out"
+
+  local rel
+  rel="$(rel_path "$src")"
+  case "$src" in
+    *.rs)
+      printf '── [Rust] %s · rustc %s, edition %s (%s) ──\n' "$rel" "$(rustc --version | cut -d' ' -f2)" "$RUST_EDITION" "$profile" >&2
+      compile_rust "$src" "$out" "$profile" >&2
+      ;;
+    *)
+      printf '── [C++] %s · %s -std=%s (%s) ──\n' "$rel" "$CXX" "$CXX_STD" "$profile" >&2
+      compile_cpp "$src" "$out" "$profile" >&2
+      ;;
+  esac
+
+  if [[ "$src" == *.rs ]]; then
+    sync_cargo_manifest
+  fi
+  if [[ "$profile" == debug ]]; then
+    prepare_debug_stdin "$src" "$n"
+  fi
+  printf '%s\n' "$out"
+}
+
+# The debugger reads stdin from a fixed path; point it at this problem's input_N.txt.
+prepare_debug_stdin() {
+  local input
+  input="$(input_file "$1" "$2")"
+  rm -f "$DEBUG_DIR/stdin"
+  if [[ -f "$input" ]]; then
+    ln -s "$input" "$DEBUG_DIR/stdin"
+    printf '── stdin: %s ──\n' "$(rel_path "$input")" >&2
+  else
+    printf '── stdin: empty (no %s) ──\n' "$(rel_path "$input")" >&2
+    : > "$DEBUG_DIR/stdin"
+  fi
+}
+
+# macOS date has no %N, so take milliseconds from perl.
+now_ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time() * 1000'; }
+elapsed_ms() { echo $(( $(now_ms) - $1 )); }
+
+cmd_run() {
+  local src n bin input start status=0
+  src="$(resolve_source "${1:-}")"
+  n="$(case_number "${2:-1}")"
+  bin="$(build "$src" run)"
+  input="$(input_file "$src" "$n")"
+
+  if [[ -f "$input" ]]; then
+    printf '── stdin: %s ──\n' "$(rel_path "$input")"
+    start=$(now_ms)
+    "$bin" < "$input" || status=$?
+  else
+    printf '── stdin: terminal (no %s/input_%s.txt; finish with ctrl-d) ──\n' "$CASE_DIR" "$n"
+    start=$(now_ms)
+    "$bin" || status=$?
+  fi
+  printf '\n── exit %d · %d ms ──\n' "$status" "$(elapsed_ms "$start")"
+  return "$status"
+}
+
+cmd_test() {
+  local src bin n in expected label actual start ms pass=0 fail=0 status
+  src="$(resolve_source "${1:-}")"
+  local -a cases=()
+  while IFS= read -r n; do cases+=("$n"); done < <(case_numbers "$src")
+  [[ ${#cases[@]} -gt 0 ]] || die "no $CASE_DIR/input_N.txt files next to $(rel_path "$src")"
+  bin="$(build "$src" run)"
+
+  for n in "${cases[@]}"; do
+    in="$(input_file "$src" "$n")"
+    expected="$(output_file "$src" "$n")"
+    label="case $n"
+    status=0
+    start=$(now_ms)
+    actual="$("$bin" < "$in")" || status=$?
+    ms="$(elapsed_ms "$start")"
+
+    if [[ $status -ne 0 ]]; then
+      printf '✗ %s  runtime error (exit %d, %d ms)\n' "$label" "$status" "$ms"
+      fail=$((fail + 1))
+    elif [[ ! -f "$expected" ]]; then
+      printf '? %s  no %s (%d ms)\n%s\n' "$label" "$(rel_path "$expected")" "$ms" "$actual"
+    elif diff -q <(normalize <<< "$actual") <(normalize < "$expected") > /dev/null; then
+      printf '✓ %s  (%d ms)\n' "$label" "$ms"
+      pass=$((pass + 1))
+    else
+      printf '✗ %s  wrong answer (%d ms)\n' "$label" "$ms"
+      diff -u --label expected --label actual <(normalize < "$expected") <(normalize <<< "$actual") || true
+      fail=$((fail + 1))
+    fi
+  done
+
+  printf '\n── %d passed, %d failed ──\n' "$pass" "$fail"
+  [[ $fail -eq 0 ]]
+}
+
+cmd_debug() {
+  local src n debugger=lldb
+  src="$(resolve_source "${1:-}")"
+  n="$(case_number "${2:-1}")"
+  build "$src" debug "$n" > /dev/null
+  if [[ "$src" == *.rs ]] && command -v rust-lldb > /dev/null; then
+    debugger=rust-lldb
+  fi
+  printf '── b <line> / b <func> → breakpoint · r → run · n/s → step · p <var> → print · q → quit ──\n'
+  exec "$debugger" -o "settings set target.input-path $DEBUG_DIR/stdin" "$DEBUG_DIR/main"
+}
+
+# Double-quoted string, valid in both TOML and JSON.
+quote_string() {
+  local s="${1//\\/\\\\}"
+  printf '"%s"' "${s//\"/\\\"}"
+}
+
+# Zed's Rust tasks and rust-analyzer both need a Cargo package. Generate a local-only,
+# git-ignored one that lists every .rs file under problem-solving/ as its own [[bin]].
+# Cargo output goes to /tmp via .cargo/config.toml so nothing lands in the vault.
+sync_cargo_manifest() {
+  local tmp file rel name
+  mkdir -p "$PROBLEM_ROOT/.cargo"
+  printf '# Generated by algo (git-ignored).\n[build]\ntarget-dir = %s\n' \
+    "$(quote_string "$BUILD_ROOT/cargo")" > "$PROBLEM_ROOT/.cargo/config.toml"
+
+  tmp="$(mktemp "$PROBLEM_ROOT/.cargo/manifest.XXXXXX")"
+  {
+    printf '# Generated by `algo sync` (git-ignored). Do not edit; lists every .rs file.\n'
+    printf '[package]\nname = "problem-solving"\nversion = "0.0.0"\nedition = "%s"\npublish = false\n' "$RUST_EDITION"
+    printf 'autobins = false\nautoexamples = false\nautotests = false\nautobenches = false\n\n'
+    printf '[lints.rust]\nunexpected_cfgs = { level = "warn", check-cfg = ["cfg(local)"] }\n'
+    while IFS= read -r file; do
+      rel="${file#"$PROBLEM_ROOT"/}"
+      name="$(printf '%s' "${rel%.rs}" | tr '/' '-' | tr -c 'A-Za-z0-9_-' '_')"
+      printf '\n[[bin]]\nname = %s\npath = %s\n' "$(quote_string "$name")" "$(quote_string "$rel")"
+    done < <(find "$PROBLEM_ROOT" -name '*.rs' -type f -not -path '*/.*' | sort)
+  } > "$tmp"
+
+  if cmp -s "$tmp" "$CARGO_MANIFEST"; then
+    rm -f "$tmp"
+  else
+    mv "$tmp" "$CARGO_MANIFEST"
+  fi
+}
+
+is_slug() { [[ "$1" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; }
+
+# Create an empty problem directory: index.md from the shared template, sources named after
+# the directory, and the first test case.
+cmd_new() {
+  local platform="${1:-}" id="${2:-}" slug="${3:-}" lang="${4:-both}" dir name
+  [[ -n "$platform" && -n "$id" && -n "$slug" ]] || die "usage: algo new <platform> <id> <slug> [--cpp|--rust]"
+  is_slug "$platform" || die "platform must be lowercase kebab-case: $platform"
+  [[ "$id" =~ ^[a-z0-9]+$ ]] || die "id must be lowercase letters/digits: $id"
+  is_slug "$slug" || die "slug must be lowercase kebab-case: $slug"
+  case "$lang" in both|--cpp|--rust) ;; *) die "unknown option: $lang" ;; esac
+  [[ -f "$TEMPLATE" ]] || die "template not found: $TEMPLATE"
+
+  name="$id-$slug"
+  dir="$PROBLEM_ROOT/$platform/$name"
+  [[ ! -e "$dir" ]] || die "already exists: $dir"
+  mkdir -p "$dir"
+
+  sed -e "s/{{title}}/$name/g" -e "s/{{date:YYYY-MM-DD}}/$(date +%F)/g" "$TEMPLATE" > "$dir/index.md"
+  [[ "$lang" == --rust ]] || : > "$dir/$name.cpp"
+  [[ "$lang" == --cpp ]]  || : > "$dir/$name.rs"
+  mkdir -p "$dir/$CASE_DIR"
+  : > "$dir/$CASE_DIR/input_1.txt"
+  : > "$dir/$CASE_DIR/output_1.txt"
+  sync_cargo_manifest
+
+  printf 'created %s\n' "$dir"
+  (cd "$dir" && find . -type f | sort | sed 's|^\./|  |')
+}
+
+# Judges ignore trailing spaces and trailing blank lines.
+normalize() { sed -e 's/[[:space:]]*$//' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}'; }
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+  case "$cmd" in
+    build)
+      local profile=run file=""
+      for arg in "$@"; do
+        if [[ "$arg" == --debug ]]; then profile=debug; else file="$arg"; fi
+      done
+      build "$(resolve_source "$file")" "$profile" 1
+      ;;
+    run)   cmd_run "$@" ;;
+    test)  cmd_test "$@" ;;
+    debug) cmd_debug "$@" ;;
+    new)   cmd_new "$@" ;;
+    sync)  sync_cargo_manifest; printf 'wrote %s\n' "$CARGO_MANIFEST" ;;
+    *)     usage ;;
+  esac
+}
+
+main "$@"

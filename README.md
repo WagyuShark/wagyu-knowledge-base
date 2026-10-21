@@ -9,6 +9,7 @@ A public, English-language knowledge repository for documenting software enginee
 ├── .obsidian/                 Obsidian vault configuration
 ├── _meta/                     Repository conventions and tag vocabulary
 ├── _templates/                Shared Learning Post templates
+├── _tools/                    Local tooling (algo: build/run/test/debug C++ and Rust solutions)
 └── content/
     ├── developer/
     ├── cloud-engineer/
@@ -112,9 +113,23 @@ content/cloud-engineer/kubernetes-services/
 ![Kubernetes service packet flow](./assets/packet-flow.png "Traffic from a client to a pod")
 ```
 
+## Problem solving (C++ / Rust)
+
+`_tools/algo` builds, runs, tests and debugs single-file solutions in `content/algorithms/problem-solving/`, from Zed shortcuts or the terminal.
+
+```bash
+_tools/algo/install.sh                 # one-time setup per machine
+algo new baekjoon 1000 a-plus-b        # create a problem folder
+algo run 1000-a-plus-b.cpp             # or press ctrl-shift-r in Zed
+```
+
+Usage: `content/algorithms/problem-solving/README.md` · Tool details: `_tools/algo/README.md`.
+
 ## Authorship
 
-This `README.md` and repository scaffolding may be created or edited with AI assistance. Every piece of knowledge content committed under `content/` is authored without AI assistance, including Learning Posts, raw source examples, images, diagrams, tags, and post metadata.
+Only my own study records are written without AI assistance: Learning Posts, my solutions to problems I actually solve, and the notes, diagrams, tags, and metadata that belong to them.
+
+Everything that supports studying may use AI assistance: READMEs, templates, conventions, tooling (`_tools/`), editor configuration, and sample or example code such as `content/algorithms/problem-solving/examples/`.
 
 ## Rules
 

@@ -1,0 +1,21 @@
+// Zed key bindings. See https://zed.dev/docs/key-bindings
+// PS bindings are repeated under "Editor" so they win over Zed's editor-level
+// defaults (a more specific context takes priority over "Workspace").
+[
+  {
+    "context": "Workspace",
+    "bindings": {
+      "ctrl-shift-b": ["task::Spawn", { "task_name": "PS: Build" }],
+      "ctrl-shift-r": ["task::Spawn", { "task_name": "PS: Run" }],
+      "ctrl-shift-t": ["task::Spawn", { "task_name": "PS: Test samples" }]
+    }
+  },
+  {
+    "context": "Editor",
+    "bindings": {
+      "ctrl-shift-b": ["task::Spawn", { "task_name": "PS: Build" }],
+      "ctrl-shift-r": ["task::Spawn", { "task_name": "PS: Run" }],
+      "ctrl-shift-t": ["task::Spawn", { "task_name": "PS: Test samples" }]
+    }
+  }
+]

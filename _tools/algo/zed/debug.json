@@ -1,0 +1,20 @@
+// Global Zed debug configurations.
+// `algo build --debug` always writes /tmp/algo-build/debug/main and links
+// /tmp/algo-build/debug/stdin to inoutput/input_1.txt next to the source.
+[
+  {
+    "label": "PS: Debug current file",
+    "adapter": "CodeLLDB",
+    "request": "launch",
+    "program": "/tmp/algo-build/debug/main",
+    "cwd": "$ZED_DIRNAME",
+    "stdio": ["/tmp/algo-build/debug/stdin", null, null],
+    "sourceLanguages": ["rust"],
+    "build": {
+      "command": "algo",
+      "args": ["build", "--debug", "$ZED_FILE"],
+      "cwd": "$ZED_DIRNAME",
+      "save": "current"
+    }
+  }
+]

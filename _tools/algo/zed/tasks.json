@@ -1,0 +1,32 @@
+// Global Zed tasks. PS tasks call `algo` (on PATH via ~/.local/bin, see _tools/algo)
+// and act on the file open in the editor (.cpp / .rs).
+[
+  {
+    "label": "PS: Build",
+    "command": "algo",
+    "args": ["build", "$ZED_FILE"],
+    "cwd": "$ZED_DIRNAME",
+    "save": "current",
+    "use_new_terminal": false,
+    "reveal": "always"
+  },
+  {
+    "label": "PS: Run",
+    "command": "algo",
+    "args": ["run", "$ZED_FILE"],
+    "cwd": "$ZED_DIRNAME",
+    "save": "current",
+    "use_new_terminal": false,
+    "reveal": "always",
+    "tags": ["rust-main"]
+  },
+  {
+    "label": "PS: Test samples",
+    "command": "algo",
+    "args": ["test", "$ZED_FILE"],
+    "cwd": "$ZED_DIRNAME",
+    "save": "current",
+    "use_new_terminal": false,
+    "reveal": "always"
+  }
+]
