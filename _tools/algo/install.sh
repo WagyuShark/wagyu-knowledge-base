@@ -61,4 +61,6 @@ for src in "$TOOL_DIR"/zed/*.json; do
   fi
 done
 
+"$TOOL_DIR/algo" sync
+
 echo "Done. Try: cd content/algorithms/problem-solving/examples/bubble-sort && algo test bubble-sort.cpp"

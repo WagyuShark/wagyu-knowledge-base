@@ -35,7 +35,8 @@ Zed's shortcuts call it; you can call it from any terminal. Usage: `content/algo
 | `problem-solving/Cargo.toml` | Generated, git-ignored; Zed and rust-analyzer need it for Rust |
 | `/tmp/algo-build/` | All binaries; nothing is written beside the source |
 
-`inoutput/`, `Cargo.toml`, `Cargo.lock`, `.cargo/` are git-ignored.
+`inoutput/` test cases are tracked so another machine can run the same tests.
+`Cargo.toml`, `Cargo.lock`, `.cargo/` are generated locally and git-ignored.
 
 ## New machine
 
@@ -45,5 +46,5 @@ _tools/algo/install.sh
 ```
 
 It checks `clang++`/`rustc` (prints the install command if missing), adds `rust-src`,
-links `~/.local/bin/algo`, and copies the Zed files. Existing, different Zed files are kept;
+links `~/.local/bin/algo`, copies the Zed files, and runs `algo sync` to regenerate the local Cargo workspace. Existing, different Zed files are kept;
 add `--replace-zed` to back them up as `*.bak` and replace them. Safe to re-run.
